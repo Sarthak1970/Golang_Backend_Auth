@@ -1,45 +1,55 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
-	"net/http"
+	"os"
 
+	"github.com/gorilla/handlers"
+	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
-
-	"Backend-Auth-Profiles/controller"
-	"Backend-Auth-Profiles/handlers"
-
+	"Backend-Auth-Profiles/handler"
+	"Backend-Auth-Profiles/utils"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func main() {
-	// Load .env file
 	if err := godotenv.Load(); err != nil {
-		log.Printf("Error loading .env file: %v", err)
-	} else {
-		log.Println(".env file loaded successfully")
+		log.Fatal("Error loading .env file")
 	}
-	var client *mongo.Client = controller.GetMongoClient()
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Server is running!")
-	})
-
-	http.HandleFunc("/auth/google", handlers.GoogleLoginHandler(client))
-	http.HandleFunc("/auth/facebook", handlers.FacebookLoginHandler(client))
-	http.HandleFunc("/auth/refresh", handlers.RefreshTokenHandler)
-
-	http.HandleFunc("/profile", handlers.ProfileHandler(client))
-	http.HandleFunc("/public", handlers.PublicProfileHandler(client))
-	http.HandleFunc("/profile/media", handlers.PublicProfileMediaHandler(client))
-	http.HandleFunc("/profile/media/live", handlers.PublicProfileMediaLiveHandler(client))
-	http.HandleFunc("/profile/media/upcoming", handlers.PublicProfileMediaUpcomingHandler(client))
-	http.HandleFunc("/profile/media2", handlers.PublicProfileMedia2Handler(client))
-
-	port := "8080"
-	fmt.Println("Server started at http://localhost:" + port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Fatal("ListenAndServe: ", err)
+	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI(os.Getenv("MONGO_URI")))
+	if err != nil {
+		log.Fatal(err)
 	}
+	defer client.Disconnect(context.Background())
+
+	router := mux.NewRouter()
+
+	router.HandleFunc("/auth/google", handler.GoogleLoginHandler(client)).Methods("POST")
+	router.HandleFunc("/auth/facebook", handler.FacebookLoginHandler(client)).Methods("POST")
+	router.HandleFunc("/auth/refresh", utils.JWTMiddleware(handlers.RefreshTokenHandler(client))).Methods("POST")
+
+	router.HandleFunc("/profile", utils.JWTMiddleware(handlers.ProfileHandler(client))).Methods("GET")
+	router.HandleFunc("/profile/picture", utils.JWTMiddleware(handlers.ProfilePictureUploadHandler(client))).Methods("PUT")
+
+	router.HandleFunc("/public", utils.LooseJWTMiddleware(handlers.PublicProfileHandler(client))).Methods("GET")
+	router.HandleFunc("/profile/media", utils.LooseJWTMiddleware(handlers.PublicProfileMediaHandler(client))).Methods("GET")
+	router.HandleFunc("/profile/media/live", utils.LooseJWTMiddleware(handlers.PublicProfileMediaLiveHandler(client))).Methods("GET")
+	router.HandleFunc("/profile/media/upcoming", utils.LooseJWTMiddleware(handlers.PublicProfileMediaUpcomingHandler(client))).Methods("GET")
+	router.HandleFunc("/profile/media2", utils.LooseJWTMiddleware(handlers.PublicProfileMedia2Handler(client))).Methods("GET")
+
+	cors := handlers.CORS(
+		handlers.AllowedOrigins([]string{"http://localhost:3000"}),
+		handlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
+		handlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),
+	)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	fmt.Printf("Server running on port %s\n", port)
+	log.Fatal(http.ListenAndServe(":"+port, cors(router)))
 }

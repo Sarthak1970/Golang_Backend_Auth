@@ -1,23 +1,29 @@
 package utils
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
 const (
-	AccessTokenTTL  = time.Hour * 7 * 24 // 7 days
-	RefreshTokenTTL = time.Hour * 24 * 1 // 1 day
+	AccessTokenTTL  = time.Hour * 1 * 24 // 7 days
+	RefreshTokenTTL = time.Hour * 24 * 7 // 1 day
 )
+
+// Claims defines the JWT claims structure
 type Claims struct {
 	UserID string `json:"user_id"`
 	Type   string `json:"type"`
 	jwt.RegisteredClaims
 }
 
+// GenerateTokens creates access and refresh tokens for a user
 func GenerateTokens(userID string) (string, string, error) {
 	jwtKey := os.Getenv("JWT_SECRET")
 	if jwtKey == "" {
@@ -66,6 +72,7 @@ func GenerateTokens(userID string) (string, string, error) {
 	return accessTokenString, refreshTokenString, nil
 }
 
+// RefreshAccessToken generates a new access token from a valid refresh token
 func RefreshAccessToken(refreshTokenString string) (string, error) {
 	jwtKey := os.Getenv("JWT_SECRET")
 	if jwtKey == "" {
@@ -75,7 +82,6 @@ func RefreshAccessToken(refreshTokenString string) (string, error) {
 
 	claims := &Claims{}
 
-	// Parse and validate the token
 	token, err := jwt.ParseWithClaims(refreshTokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		return []byte(jwtKey), nil
 	})
@@ -124,4 +130,61 @@ func RefreshAccessToken(refreshTokenString string) (string, error) {
 	fmt.Println("Generated New Access Token:", tokenString)
 
 	return tokenString, nil
+}
+
+func JWTMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+			http.Error(w, `{"message": "Missing or invalid Authorization header", "status": false}`, http.StatusUnauthorized)
+			return
+		}
+
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		claims := &Claims{}
+
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			return []byte(os.Getenv("JWT_SECRET")), nil
+		})
+		if err != nil {
+			fmt.Printf("Error parsing token: %v\n", err)
+			if err == jwt.ErrTokenExpired {
+				http.Error(w, `{"message": "Token has expired", "status": false}`, http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, `{"message": "Invalid token", "status": false}`, http.StatusUnauthorized)
+			return
+		}
+
+		if !token.Valid || claims.Type != "access" {
+			http.Error(w, `{"message": "Invalid or not an access token", "status": false}`, http.StatusUnauthorized)
+			return
+		}
+
+		if claims.UserID == "" {
+			http.Error(w, `{"message": "Missing user_id in token", "status": false}`, http.StatusUnauthorized)
+			return
+		}
+
+		ctx := context.WithValue(r.Context(), "userID", claims.UserID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	}
+}
+func LooseJWTMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+			claims := &Claims{}
+
+			token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+				return []byte(os.Getenv("JWT_SECRET")), nil
+			})
+			if err == nil && token.Valid && claims.Type == "access" && claims.UserID != "" {
+				ctx = context.WithValue(ctx, "userID", claims.UserID)
+			}
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
+	}
 }

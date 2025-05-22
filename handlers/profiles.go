@@ -1,8 +1,7 @@
-package handlers
+package handler
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -36,58 +35,30 @@ var PublicProfileMedia2Fields = bson.M{
 	"name":  1,
 }
 
-// User represents the user profile structure
-type User struct {
-	ID             primitive.ObjectID `bson:"_id"`
-	Email          string             `bson:"email"`
-	Name           string             `bson:"name"`
-	Bio            string             `bson:"bio"`
-	WebAddress     string             `bson:"web_address"`
-	ChannelName    string             `bson:"channel_name"`
-	AreaOfExpert   string             `bson:"area_of_expert"`
-	ProfilePicture string             `bson:"profile_picture"`
-	Verified       bool               `bson:"verified"`
-	Location       string             `bson:"location"`
-	Provider       string             `bson:"provider"`
-	Followers      []string           `bson:"follower"`
-	Following      []string           `bson:"following"`
-}
-
 // Room represents a room document
 type Room struct {
 	ID        primitive.ObjectID `bson:"_id"`
 	Creator   bson.M             `bson:"creator"`
 	Live      bool               `bson:"live,omitempty"`
 	Schedule  int64              `bson:"schedule,omitempty"`
-	// Add other room fields as needed
+	// add other fields according to documentation later
 }
 
 // Video represents a video document
 type Video struct {
 	ID      primitive.ObjectID `bson:"_id"`
 	Profile bson.M             `bson:"profile"`
-	// Add other video fields as needed
-}
-
-// Response represents the standard API response structure
-type Response struct {
-	Data    interface{} `json:"data"`
-	Message string      `json:"message"`
-	Status  bool        `json:"status"`
 }
 
 // ProfileHandler handles the /profile endpoint
 func ProfileHandler(client *mongo.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Placeholder: Implement logic for authenticated user's profile
-		// Likely requires JWT authentication to get the current user's ID
-		userID, isAuthenticated := getUserIDFromJWT(r)
-		if !isAuthenticated {
+		userID, ok := r.Context().Value("userID").(string)
+		if !ok {
 			writeJSONError(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		// Example: Fetch the authenticated user's profile
 		collection := client.Database("auth").Collection("profile")
 		var user User
 		objID, err := primitive.ObjectIDFromHex(userID)
@@ -173,9 +144,7 @@ func PublicProfileHandler(client *mongo.Client) http.HandlerFunc {
 			"follower_count": len(user.Followers),
 			"following_count": len(user.Following),
 		}
-
-		userID, isAuthenticated := getUserIDFromJWT(r)
-		if isAuthenticated {
+		if userID, ok := r.Context().Value("userID").(string); ok {
 			isFollowing := false
 			for _, follower := range user.Followers {
 				if follower == userID {
@@ -209,8 +178,6 @@ func PublicProfileMediaHandler(client *mongo.Client) http.HandlerFunc {
 			writeJSONError(w, "Invalid id format", http.StatusBadRequest)
 			return
 		}
-
-		// Check if user exists
 		collection := client.Database("auth").Collection("profile")
 		var user bson.M
 		err = collection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&user)
@@ -223,7 +190,7 @@ func PublicProfileMediaHandler(client *mongo.Client) http.HandlerFunc {
 			return
 		}
 
-		// Fetch videos
+		// Fetching videos
 		videoCollection := client.Database("videos").Collection("upload")
 		videoCursor, err := videoCollection.Find(context.Background(), bson.M{"profile._id": objID})
 		if err != nil {
@@ -338,7 +305,6 @@ func PublicProfileMediaUpcomingHandler(client *mongo.Client) http.HandlerFunc {
 			return
 		}
 
-		// Check if user exists
 		collection := client.Database("auth").Collection("profile")
 		var user bson.M
 		err = collection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&user)
@@ -350,8 +316,6 @@ func PublicProfileMediaUpcomingHandler(client *mongo.Client) http.HandlerFunc {
 			writeJSONError(w, "Internal server error", http.StatusInternalServerError)
 			return
 		}
-
-		// Fetch rooms
 		roomCollection := client.Database("myspace").Collection("rooms")
 		cursor, err := roomCollection.Find(context.Background(), bson.M{"creator._id": objID})
 		if err != nil {
@@ -366,7 +330,6 @@ func PublicProfileMediaUpcomingHandler(client *mongo.Client) http.HandlerFunc {
 			return
 		}
 
-		// Filter upcoming rooms
 		var upcomingRooms []Room
 		now := time.Now()
 		for _, room := range rooms {
@@ -416,38 +379,17 @@ func PublicProfileMedia2Handler(client *mongo.Client) http.HandlerFunc {
 			return
 		}
 
-		data := user.ID.Hex()
+		data := map[string]interface{}{
+			"_id":   user.ID.Hex(),
+			"email": user.Email,
+			"name":  user.Name,
+		}
 
 		response := Response{
 			Data:    data,
-			Message: "Data",
+			Message: "Profile Data Extracted",
 			Status:  true,
 		}
 		writeJSONResponse(w, response, http.StatusOK)
 	}
-}
-
-// writeJSONResponse writes a JSON response with the given status code
-func writeJSONResponse(w http.ResponseWriter, response Response, statusCode int) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(response)
-}
-
-// writeJSONError writes a JSON error response with the given message and status code
-func writeJSONError(w http.ResponseWriter, message string, statusCode int) {
-	response := Response{
-		Message: message,
-		Status:  false,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(response)
-}
-
-// getUserIDFromJWT is a placeholder for JWT authentication logic
-func getUserIDFromJWT(r *http.Request) (string, bool) {
-	// Implement JWT parsing and user ID extraction in utils/jwt.go
-	// Return user ID and authentication status
-	return "", false
 }
