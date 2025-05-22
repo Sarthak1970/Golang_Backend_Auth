@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"net/http"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
@@ -29,16 +30,16 @@ func main() {
 
 	router.HandleFunc("/auth/google", handler.GoogleLoginHandler(client)).Methods("POST")
 	router.HandleFunc("/auth/facebook", handler.FacebookLoginHandler(client)).Methods("POST")
-	router.HandleFunc("/auth/refresh", utils.JWTMiddleware(handlers.RefreshTokenHandler(client))).Methods("POST")
+	router.HandleFunc("/auth/refresh", utils.JWTMiddleware(handler.RefreshTokenHandler)).Methods("POST")
 
-	router.HandleFunc("/profile", utils.JWTMiddleware(handlers.ProfileHandler(client))).Methods("GET")
-	router.HandleFunc("/profile/picture", utils.JWTMiddleware(handlers.ProfilePictureUploadHandler(client))).Methods("PUT")
+	router.HandleFunc("/profile", utils.JWTMiddleware(handler.ProfileHandler(client))).Methods("GET")
+	router.HandleFunc("/profile/picture", utils.JWTMiddleware(handler.ProfilePictureUploadHandler(client))).Methods("PUT")
 
-	router.HandleFunc("/public", utils.LooseJWTMiddleware(handlers.PublicProfileHandler(client))).Methods("GET")
-	router.HandleFunc("/profile/media", utils.LooseJWTMiddleware(handlers.PublicProfileMediaHandler(client))).Methods("GET")
-	router.HandleFunc("/profile/media/live", utils.LooseJWTMiddleware(handlers.PublicProfileMediaLiveHandler(client))).Methods("GET")
-	router.HandleFunc("/profile/media/upcoming", utils.LooseJWTMiddleware(handlers.PublicProfileMediaUpcomingHandler(client))).Methods("GET")
-	router.HandleFunc("/profile/media2", utils.LooseJWTMiddleware(handlers.PublicProfileMedia2Handler(client))).Methods("GET")
+	router.HandleFunc("/public", utils.LooseJWTMiddleware(handler.PublicProfileHandler(client))).Methods("GET")
+	router.HandleFunc("/profile/media", utils.LooseJWTMiddleware(handler.PublicProfileMediaHandler(client))).Methods("GET")
+	router.HandleFunc("/profile/media/live", utils.LooseJWTMiddleware(handler.PublicProfileMediaLiveHandler(client))).Methods("GET")
+	router.HandleFunc("/profile/media/upcoming", utils.LooseJWTMiddleware(handler.PublicProfileMediaUpcomingHandler(client))).Methods("GET")
+	router.HandleFunc("/profile/media2", utils.LooseJWTMiddleware(handler.PublicProfileMedia2Handler(client))).Methods("GET")
 
 	cors := handlers.CORS(
 		handlers.AllowedOrigins([]string{"http://localhost:3000"}),
